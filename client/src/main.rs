@@ -1,4 +1,3 @@
-use std::fs;
 use std::net::{SocketAddr, UdpSocket};
 use tftp_libs::{build_message, extract_message, Message};
 
@@ -27,15 +26,17 @@ fn main() {
     }
 }
 
-fn handle_request(udp_socket: &UdpSocket, source_address: SocketAddr, buffer: &[u8]) -> bool{
+fn handle_request(udp_socket: &UdpSocket, source_address: SocketAddr, buffer: &[u8]) -> bool {
     let message = extract_message(buffer);
     match message {
         Message::ReadRequest { file_name, mode } => {
             // TODO client doesn't need to handle read requests
+            println!("received request to read {} with mode {}", file_name, mode);
             panic!("Client received read request")
         }
         Message::WriteRequest { file_name, mode } => {
             // TODO client doesn't need to handle read requests
+            println!("received request to write {} with mode {}", file_name, mode);
             panic!("Client received write request")
         }
         Message::Data {
@@ -48,9 +49,7 @@ fn handle_request(udp_socket: &UdpSocket, source_address: SocketAddr, buffer: &[
                 length, block_number
             );
 
-            println!(
-                "Data: {}",
-                String::from_utf8_lossy(data)          );
+            println!("Data: {}", String::from_utf8_lossy(data));
             let message = Message::Ack { block_number };
             let message_data = build_message(message);
             //TODO write the contents to a file
@@ -72,6 +71,7 @@ fn handle_request(udp_socket: &UdpSocket, source_address: SocketAddr, buffer: &[
             error_message,
         } => {
             println!("received error message :{}", error_message);
+            println!("received error code :{}", error_code);
             true
         }
     }
