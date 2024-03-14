@@ -1,4 +1,3 @@
-
 pub fn build_message(tftp_message: Message) -> Vec<u8> {
     match tftp_message {
         Message::ReadRequest { file_name, mode } => {
