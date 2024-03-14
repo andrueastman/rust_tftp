@@ -108,7 +108,11 @@ fn handle_request(
                 .write(data)
                 .expect("Error writing chunk to file");
             // TODO handle write error and re-request the block??
-            send_tftp_message(udp_socket, Message::Ack { block_number }, &source_address.to_string());
+            send_tftp_message(
+                udp_socket,
+                Message::Ack { block_number },
+                &source_address.to_string(),
+            );
             println!("sent back ack for block number {}", block_number);
             if length < 512 {
                 println!("Upload Complete");

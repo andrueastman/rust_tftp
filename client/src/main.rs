@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io;
 use std::io::{BufRead, BufWriter, Seek, SeekFrom, Write};
 use std::net::UdpSocket;
-use tftp_libs::{extract_message, send_tftp_message, Message, TftpSessionInfo, get_read_file_info};
+use tftp_libs::{extract_message, get_read_file_info, send_tftp_message, Message, TftpSessionInfo};
 
 const SERVER_HOST: &str = "127.0.0.1:69";
 
@@ -66,7 +66,6 @@ fn put_file(udp_socket: &UdpSocket) {
     println!("Upload mode:");
     let file_name = get_file_name();
 
-
     let file_result = get_read_file_info(file_name.clone());
     let (reader, file_length) = match file_result {
         Ok((reader, length)) => (reader, length),
@@ -94,8 +93,7 @@ fn put_file(udp_socket: &UdpSocket) {
     do_work(udp_socket, &mut session_info);
 }
 
-
-fn do_work(udp_socket: &UdpSocket, session_info: &mut TftpSessionInfo){
+fn do_work(udp_socket: &UdpSocket, session_info: &mut TftpSessionInfo) {
     let mut buffer = [0; 520];
     loop {
         let receive_result = udp_socket.recv_from(&mut buffer);
@@ -179,7 +177,7 @@ fn handle_request(
                     session_info.file_name
                 );
                 println!("Download Complete");
-                return true
+                return true;
             }
 
             println!("Reading next block of file: {}", session_info.file_name);
