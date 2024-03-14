@@ -1,6 +1,8 @@
+use std::fs::File;
 use std::io;
-use std::net::{UdpSocket};
-use tftp_libs::{extract_message, Message, send_tftp_message};
+use std::io::{BufWriter, Write};
+use std::net::UdpSocket;
+use tftp_libs::{extract_message, send_tftp_message, Message};
 
 const SERVER_HOST: &str = "127.0.0.1:69";
 
@@ -37,46 +39,55 @@ fn main() {
             }
         }
     }
-
 }
 
-fn get_file(udp_socket: &UdpSocket){
+fn get_file(udp_socket: &UdpSocket) {
     println!("Download mode:");
 
     let file_name = get_file_name();
     // send a read request with the file name
-    send_tftp_message(udp_socket, Message::ReadRequest {
-        file_name: file_name.trim().to_string(),
-        mode: "default".to_string()//TODO: implement mode
-    }, SERVER_HOST);
+    send_tftp_message(
+        udp_socket,
+        Message::ReadRequest {
+            file_name: file_name.trim().to_string(),
+            mode: "default".to_string(), //TODO: implement mode
+        },
+        SERVER_HOST,
+    );
 
+    let file = File::create(file_name).expect("Error creating file");
+    let mut writer = BufWriter::new(file);
     let mut buffer = [0; 520];
     loop {
-        let (amt, src) = udp_socket.recv_from(&mut buffer).expect("Failed to receive data"); // TODO relook this expect?
+        let (amt, src) = udp_socket
+            .recv_from(&mut buffer)
+            .expect("Failed to receive data"); // TODO relook this expect?
         let buf = &mut buffer[..amt];
-        println!("Received {} bytes from {}", amt, src);
-        let completed = handle_request(&udp_socket, buf);
+        let completed = handle_request(&udp_socket, buf, &mut writer);
         if completed {
-            println!("Download Complete");
             println!("*****************************************");
             break;
         }
     }
 }
 
-fn put_file(udp_socket: &UdpSocket){
+fn put_file(udp_socket: &UdpSocket) {
     println!("Upload mode:");
     let file_name = get_file_name();
     // send a read request with the file name
-    send_tftp_message(udp_socket, Message::WriteRequest {
-        file_name: file_name.to_string(),
-        mode: "default".to_string()//TODO: implement mode
-    }, SERVER_HOST);
+    send_tftp_message(
+        udp_socket,
+        Message::WriteRequest {
+            file_name: file_name.to_string(),
+            mode: "default".to_string(), //TODO: implement mode
+        },
+        SERVER_HOST,
+    );
 
     //TODO upload the file
 }
 
-fn get_file_name<'a>() -> String{
+fn get_file_name<'a>() -> String {
     println!("Enter file name: ");
     let mut file_name = String::new();
     io::stdin()
@@ -86,7 +97,7 @@ fn get_file_name<'a>() -> String{
     file_name.trim().to_string()
 }
 
-fn handle_request(udp_socket: &UdpSocket, buffer: &[u8]) -> bool {
+fn handle_request(udp_socket: &UdpSocket, buffer: &[u8], writer: &mut BufWriter<File>) -> bool {
     let message = extract_message(buffer);
     match message {
         Message::ReadRequest { file_name, mode } => {
@@ -109,12 +120,13 @@ fn handle_request(udp_socket: &UdpSocket, buffer: &[u8]) -> bool {
                 length, block_number
             );
 
-            println!("Data: {}", String::from_utf8_lossy(data));
-
-            //TODO write the contents to a file
+            //write the contents to file
+            writer.write(data).expect("Error writin chunk to file");
+            // TODO handle write error and re-request the block??
             send_tftp_message(udp_socket, Message::Ack { block_number }, SERVER_HOST);
             println!("sent back ack for block number {}", block_number);
             if length < 512 {
+                println!("Download Complete");
                 return true;
             }
             return false;
@@ -127,8 +139,8 @@ fn handle_request(udp_socket: &UdpSocket, buffer: &[u8]) -> bool {
             error_code,
             error_message,
         } => {
-            println!("received error message :{}", error_message);
-            println!("received error code :{}", error_code);
+            eprintln!("received error message : {}", error_message);
+            eprintln!("received error code : {}", error_code);
             true
         }
     }

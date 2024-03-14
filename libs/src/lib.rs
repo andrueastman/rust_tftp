@@ -55,7 +55,8 @@ fn build_message(tftp_message: Message) -> Vec<u8> {
             message[1] = OpCode::Error as u8;
             message[2] = (error_code >> 8) as u8;
             message[3] = error_code as u8;
-            message[4..error_message.len()].copy_from_slice(error_message.as_bytes());
+            message[4..error_message.len() + 4].copy_from_slice(error_message.as_bytes());
+            message[4 + error_message.len()] = 0;
             message
         }
     }

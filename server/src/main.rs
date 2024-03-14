@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek};
+use std::io::{BufRead, BufReader, ErrorKind, Seek};
 use std::net::{SocketAddr, UdpSocket};
-use tftp_libs::{extract_message, Message, send_tftp_message};
+use tftp_libs::{extract_message, send_tftp_message, Message};
 
 const SERVER_HOST: &str = "127.0.0.1:69";
 
 struct ClientInfo {
     file_name: String,
     reader: Option<BufReader<File>>,
-    block_count: usize
+    block_count: usize,
 }
 
 fn main() {
@@ -32,7 +32,7 @@ fn main() {
             let client_info = ClientInfo {
                 file_name: String::new(),
                 reader: None,
-                block_count: 0
+                block_count: 0,
             };
             clients.insert(src, client_info);
         }
@@ -51,11 +51,40 @@ fn handle_request(
     match message {
         Message::ReadRequest { file_name, mode } => {
             println!("received request to read {} with mode {}", file_name, mode);
-            println!("Current directory {}", std::env::current_dir().unwrap().display());
+            let file_result = File::open(file_name.clone());
+            let file: File = match file_result {
+                Ok(file) => file,
+                Err(error) => {
+                    match error.kind() {
+                        ErrorKind::NotFound => {
+                            send_tftp_message(
+                                udp_socket,
+                                Message::Error {
+                                    error_code: 1,
+                                    error_message: "File not found".to_string(),
+                                },
+                                &source_address.to_string(),
+                            );
+                        }
 
-            let file = File::open(file_name.clone())
-                .expect("Unable to read file with the given file name");
-            let file_length = File::metadata(&file).expect("Unable to read metadata").len();
+                        error => {
+                            send_tftp_message(
+                                udp_socket,
+                                Message::Error {
+                                    error_code: 0, //unknown
+                                    error_message: error.to_string(),
+                                },
+                                &source_address.to_string(),
+                            );
+                        }
+                    };
+
+                    return;
+                }
+            };
+            let file_length = File::metadata(&file)
+                .expect("Unable to read metadata")
+                .len();
             let mut reader = BufReader::with_capacity(512, file);
             let contents = reader.fill_buf().expect("Unable to read file contents");
             let block_size = if contents.len() > 512 {
@@ -65,18 +94,22 @@ fn handle_request(
             };
             let block_number = 1;
 
-            send_tftp_message(udp_socket,Message::Data {
-                block_number,
-                data: contents[0..block_size].as_ref(),
-                length: block_size,
-            },&source_address.to_string());
+            send_tftp_message(
+                udp_socket,
+                Message::Data {
+                    block_number,
+                    data: contents[0..block_size].as_ref(),
+                    length: block_size,
+                },
+                &source_address.to_string(),
+            );
 
             let client_info = clients
                 .get_mut(&source_address)
                 .expect("Unable to get file name");
             client_info.file_name = String::from(file_name);
             client_info.reader = Option::from(reader);
-            client_info.block_count =  ((file_length/ 512) + 1u64) as usize;
+            client_info.block_count = ((file_length / 512) + 1u64) as usize;
             println!("Sent back first block of {} bytes", block_size);
         }
         Message::WriteRequest { file_name, mode } => {
@@ -94,7 +127,6 @@ fn handle_request(
             println!("Data: {}", String::from_utf8_lossy(data));
         }
         Message::Ack { block_number } => {
-
             println!("received ack of block {}", block_number);
             let client_info = clients
                 .get_mut(&source_address)
@@ -103,8 +135,10 @@ fn handle_request(
             if block_number == client_info.block_count as u16 {
                 println!("Received last ack for file name: {}", client_info.file_name);
                 // We are done clean up
-                clients.remove(&source_address).expect("Error removing the client");
-                return
+                clients
+                    .remove(&source_address)
+                    .expect("Error removing the client");
+                return;
             }
 
             println!("Reading next block of file: {}", client_info.file_name);
@@ -121,19 +155,21 @@ fn handle_request(
             let block_number = block_number + 1;
 
             //TODO send back error if block is out of range
-            send_tftp_message(udp_socket,Message::Data {
-                block_number,
-                data: contents[0..block_size].as_ref(),
-                length: block_size,
-            },&source_address.to_string());
+            send_tftp_message(
+                udp_socket,
+                Message::Data {
+                    block_number,
+                    data: contents[0..block_size].as_ref(),
+                    length: block_size,
+                },
+                &source_address.to_string(),
+            );
             println!(
                 "Sent back block number {} of {} bytes",
                 block_number, block_size
             );
             if contents.len() < 512 {
-                println!(
-                    "Sent back last block to client"
-                );
+                println!("Sent back last block to client");
             }
         }
         Message::Error {
