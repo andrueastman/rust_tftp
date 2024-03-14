@@ -1,4 +1,6 @@
-pub fn build_message(tftp_message: Message) -> Vec<u8> {
+use std::net::UdpSocket;
+
+fn build_message(tftp_message: Message) -> Vec<u8> {
     match tftp_message {
         Message::ReadRequest { file_name, mode } => {
             let mut message = vec![0; 2 + file_name.len() + 1 + mode.len() + 1];
@@ -71,9 +73,15 @@ pub fn extract_opcode(buffer: &[u8]) -> OpCode {
     }
 }
 
+pub fn send_tftp_message(udp_socket: &UdpSocket, message: Message, destination: &str) {
+    let message_data = build_message(message);
+    udp_socket
+        .send_to(&message_data, destination)
+        .expect("Failed to send data");
+}
+
 pub fn extract_message(buffer: &[u8]) -> Message {
     let opcode = extract_opcode(buffer);
-    println!("Received opcode: {:?}", opcode);
     match opcode {
         OpCode::Read => {
             let mut file_name = String::new();
