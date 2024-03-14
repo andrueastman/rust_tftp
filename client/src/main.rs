@@ -1,8 +1,8 @@
 use std::fs::File;
 use std::io;
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufWriter, Seek, SeekFrom, Write};
 use std::net::UdpSocket;
-use tftp_libs::{extract_message, send_tftp_message, Message, TftpSessionInfo};
+use tftp_libs::{extract_message, send_tftp_message, Message, TftpSessionInfo, get_read_file_info};
 
 const SERVER_HOST: &str = "127.0.0.1:69";
 
@@ -59,28 +59,29 @@ fn get_file(udp_socket: &UdpSocket) {
         SERVER_HOST,
     );
 
-    //TODO create the file after confirming it exists
-    let mut buffer = [0; 520];
-    loop {
-        let receive_result = udp_socket.recv_from(&mut buffer);
-        if receive_result.is_err() {
-            println!("Failed to receive data");
-            continue;
-        }
-        let (amt, _) = receive_result.unwrap();
-        let buf = &mut buffer[..amt];
-        let completed = handle_request(&udp_socket, buf, &mut session_info);
-        if completed {
-            println!("*****************************************");
-            break;
-        }
-    }
+    do_work(udp_socket, &mut session_info);
 }
 
 fn put_file(udp_socket: &UdpSocket) {
     println!("Upload mode:");
     let file_name = get_file_name();
-    // send a read request with the file name
+
+
+    let file_result = get_read_file_info(file_name.clone());
+    let (reader, file_length) = match file_result {
+        Ok((reader, length)) => (reader, length),
+        Err(error) => {
+            eprintln!("Error reading file: {}", error);
+            return; // nothing else to do here
+        }
+    };
+
+    let mut session_info = TftpSessionInfo::new();
+    session_info.file_name = file_name.clone();
+    session_info.reader = Some(reader);
+    session_info.block_count = ((file_length / 512) + 1u64) as usize;
+
+    // send a write request with the file name
     send_tftp_message(
         udp_socket,
         Message::WriteRequest {
@@ -90,9 +91,27 @@ fn put_file(udp_socket: &UdpSocket) {
         SERVER_HOST,
     );
 
-    //TODO upload the file
+    do_work(udp_socket, &mut session_info);
 }
 
+
+fn do_work(udp_socket: &UdpSocket, session_info: &mut TftpSessionInfo){
+    let mut buffer = [0; 520];
+    loop {
+        let receive_result = udp_socket.recv_from(&mut buffer);
+        if receive_result.is_err() {
+            println!("Failed to receive data");
+            continue;
+        }
+        let (amt, _) = receive_result.unwrap();
+        let buf = &mut buffer[..amt];
+        let completed = handle_request(&udp_socket, buf, session_info);
+        if completed {
+            println!("*****************************************");
+            break;
+        }
+    }
+}
 fn get_file_name<'a>() -> String {
     println!("Enter file name: ");
     let mut file_name = String::new();
@@ -153,6 +172,45 @@ fn handle_request(
         }
         Message::Ack { block_number } => {
             println!("received ack of block {}", block_number);
+            // check if we are done
+            if block_number == session_info.block_count as u16 {
+                println!(
+                    "Received last ack for file name: {}",
+                    session_info.file_name
+                );
+                println!("Download Complete");
+                return true
+            }
+
+            println!("Reading next block of file: {}", session_info.file_name);
+            let reader = session_info.reader.as_mut().expect("Reader not found");
+            if block_number != 0 {
+                reader
+                    .seek(SeekFrom::Current(512))
+                    .expect("Unable to seek file"); // move to next block
+            }
+            let contents = reader.fill_buf().expect("Unable to read file contents");
+            let block_number = block_number + 1;
+
+            //TODO send back error if block is out of range
+            send_tftp_message(
+                udp_socket,
+                Message::Data {
+                    block_number,
+                    data: contents[0..contents.len()].as_ref(),
+                    length: contents.len(),
+                },
+                SERVER_HOST,
+            );
+
+            println!(
+                "Sent back block number {} of {} bytes",
+                block_number,
+                contents.len()
+            );
+            if contents.len() < 512 {
+                println!("Sent back last block to client");
+            }
             false
         }
         Message::Error {

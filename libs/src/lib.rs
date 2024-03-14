@@ -20,11 +20,11 @@ fn build_message(tftp_message: Message) -> Vec<u8> {
             let mut message = vec![0; 2 + file_name.len() + 1 + mode.len() + 1];
             message[0] = 0;
             message[1] = OpCode::Write as u8;
-            message[2..file_name.len()].copy_from_slice(file_name.as_bytes());
-            message[file_name.len()] = 0;
-            message[file_name.len() + 1..file_name.len() + 1 + mode.len()]
+            message[2..file_name.len()+2].copy_from_slice(file_name.as_bytes());
+            message[file_name.len()+2] = 0;
+            message[file_name.len() + 1+2..file_name.len() + 1 + 2+mode.len()]
                 .copy_from_slice(mode.as_bytes());
-            message[file_name.len() + 1 + mode.len()] = 0;
+            message[file_name.len() + 1 +2+ mode.len()] = 0;
             message
         }
         Message::Data {
