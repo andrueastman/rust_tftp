@@ -1,4 +1,7 @@
-use std::net::UdpSocket;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Error, ErrorKind};
+use std::net::{SocketAddr, UdpSocket};
 
 fn build_message(tftp_message: Message) -> Vec<u8> {
     match tftp_message {
@@ -143,6 +146,37 @@ pub fn extract_message(buffer: &[u8]) -> Message {
     }
 }
 
+pub fn get_read_file_info(file_name: String) -> Result<(BufReader<File>, u64), Error> {
+    match File::open(file_name) {
+        Ok(file) => {
+            let file_length = file.metadata().expect("Unable to read metadata").len();
+            let reader = BufReader::with_capacity(512, file);
+            Ok((reader, file_length))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn send_error_message(error: Error, udp_socket: &UdpSocket, destination: &str) {
+    let message: Message = match error.kind() {
+        ErrorKind::NotFound => {
+            // send a not found message
+            Message::Error {
+                error_code: 1,
+                error_message: "File not found".to_string(),
+            }
+        }
+        // send back generic error
+        error => {
+            Message::Error {
+                error_code: 0, //unknown
+                error_message: error.to_string(),
+            }
+        }
+    };
+    send_tftp_message(udp_socket, message, destination);
+}
+
 #[derive(Debug)]
 pub enum OpCode {
     Read = 1,
@@ -173,4 +207,47 @@ pub enum Message<'t> {
         error_code: u16,
         error_message: String,
     }, //error code and error message
+}
+
+pub struct TftpSessionInfo {
+    pub file_name: String,
+    pub reader: Option<BufReader<File>>,
+    pub writer: Option<BufWriter<File>>,
+    pub block_count: usize,
+}
+
+impl TftpSessionInfo {
+    pub fn new() -> Self {
+        TftpSessionInfo {
+            file_name: String::new(),
+            reader: None,
+            writer: None,
+            block_count: 0,
+        }
+    }
+}
+pub struct SessionRegistry {
+    sessions: HashMap<SocketAddr, TftpSessionInfo>,
+}
+
+impl SessionRegistry {
+    pub fn new() -> Self {
+        SessionRegistry {
+            sessions: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, address: SocketAddr, session_info: TftpSessionInfo) {
+        if !self.sessions.contains_key(&address) {
+            self.sessions.insert(address, session_info);
+        }
+    }
+
+    pub fn deregister(&mut self, address: SocketAddr) {
+        self.sessions.remove(&address);
+    }
+
+    pub fn get_session(&mut self, address: SocketAddr) -> Option<&mut TftpSessionInfo> {
+        self.sessions.get_mut(&address)
+    }
 }

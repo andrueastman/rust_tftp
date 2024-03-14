@@ -2,12 +2,13 @@ use std::fs::File;
 use std::io;
 use std::io::{BufWriter, Write};
 use std::net::UdpSocket;
-use tftp_libs::{extract_message, send_tftp_message, Message};
+use tftp_libs::{extract_message, send_tftp_message, Message, TftpSessionInfo};
 
 const SERVER_HOST: &str = "127.0.0.1:69";
 
 fn main() {
     let socket = UdpSocket::bind("127.0.0.1:34252").expect("Failed to bind to udp socket");
+
     println!("Welcome to a simple TFTP client!");
     loop {
         println!("*****************************************");
@@ -45,6 +46,9 @@ fn get_file(udp_socket: &UdpSocket) {
     println!("Download mode:");
 
     let file_name = get_file_name();
+    let mut session_info = TftpSessionInfo::new();
+    session_info.file_name = file_name.clone();
+
     // send a read request with the file name
     send_tftp_message(
         udp_socket,
@@ -55,15 +59,17 @@ fn get_file(udp_socket: &UdpSocket) {
         SERVER_HOST,
     );
 
-    let file = File::create(file_name).expect("Error creating file");
-    let mut writer = BufWriter::new(file);
+    //TODO create the file after confirming it exists
     let mut buffer = [0; 520];
     loop {
-        let (amt, src) = udp_socket
-            .recv_from(&mut buffer)
-            .expect("Failed to receive data"); // TODO relook this expect?
+        let receive_result = udp_socket.recv_from(&mut buffer);
+        if receive_result.is_err() {
+            println!("Failed to receive data");
+            continue;
+        }
+        let (amt, _) = receive_result.unwrap();
         let buf = &mut buffer[..amt];
-        let completed = handle_request(&udp_socket, buf, &mut writer);
+        let completed = handle_request(&udp_socket, buf, &mut session_info);
         if completed {
             println!("*****************************************");
             break;
@@ -97,7 +103,11 @@ fn get_file_name<'a>() -> String {
     file_name.trim().to_string()
 }
 
-fn handle_request(udp_socket: &UdpSocket, buffer: &[u8], writer: &mut BufWriter<File>) -> bool {
+fn handle_request(
+    udp_socket: &UdpSocket,
+    buffer: &[u8],
+    session_info: &mut TftpSessionInfo,
+) -> bool {
     let message = extract_message(buffer);
     match message {
         Message::ReadRequest { file_name, mode } => {
@@ -119,9 +129,19 @@ fn handle_request(udp_socket: &UdpSocket, buffer: &[u8], writer: &mut BufWriter<
                 "received data of length {} for block {}",
                 length, block_number
             );
-
+            if block_number == 1 {
+                let file =
+                    File::create(session_info.file_name.clone()).expect("Error creating file");
+                let writer = BufWriter::new(file);
+                session_info.writer = Some(writer);
+            }
             //write the contents to file
-            writer.write(data).expect("Error writin chunk to file");
+            session_info
+                .writer
+                .as_mut()
+                .expect("Writer not set")
+                .write(data)
+                .expect("Error writing chunk to file");
             // TODO handle write error and re-request the block??
             send_tftp_message(udp_socket, Message::Ack { block_number }, SERVER_HOST);
             println!("sent back ack for block number {}", block_number);
